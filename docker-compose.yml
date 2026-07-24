@@ -1,0 +1,63 @@
+# docker-compose.yml
+# Runs full stack: API + PostgreSQL + pgvector
+#
+# Usage:
+#   docker compose up          — start everything
+#   docker compose up -d       — start in background
+#   docker compose down        — stop
+#   docker compose down -v     — stop and delete data
+
+services:
+
+  # PostgreSQL 16 with pgvector pre-installed
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB:       fintech_rag
+      POSTGRES_USER:     fintech
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./src/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fintech -d fintech_rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Ingestor — runs once to populate DB, then exits
+  ingestor:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://fintech:${POSTGRES_PASSWORD:-devpassword}@db:5432/fintech_rag
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: python -c "from src.ingestion.ingestor import ingest_all_sources; ingest_all_sources(strategy='clause')"
+    restart: "no"
+    volumes:
+      - ./data:/app/data
+
+  # FastAPI application
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://fintech:${POSTGRES_PASSWORD:-devpassword}@db:5432/fintech_rag
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+
+volumes:
+  postgres_data:

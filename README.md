@@ -1,0 +1,255 @@
+# Fintech Hybrid RAG Engine
+
+A production-grade Retrieval-Augmented Generation system for querying ACH payment
+compliance documentation. Built for fintech payment operations teams who need fast,
+accurate, auditable answers on Nacha return codes, retry rules, and compliance thresholds.
+
+**Live demo:** `https://fintech-rag.up.railway.app/docs`
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Indexing pipeline                       │
+│                                                             │
+│  Nacha/OFAC sources → Fetcher → Chunker → Embedder → pgvector │
+│  (4 authoritative    (httpx +  (clause   (BGE-small  (HNSW  │
+│   web sources)       BS4)      split)    -en-v1.5)   index) │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                      Query pipeline                          │
+│                                                             │
+│  Question → Hybrid Retriever → Prompt builder → Claude API  │
+│             ├── BM25 search                   (Haiku)       │
+│             ├── pgvector search                             │
+│             ├── RRF fusion                   → Answer +     │
+│             ├── Deduplication                  Sources +    │
+│             └── Code injection                 Latency      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Key design decisions
+
+### Hybrid retrieval (BM25 + dense vector + RRF)
+
+Pure vector search misses exact code lookups — "R29" has no semantic
+meaning as a string, so BGE may return R07 or R10 instead. Pure BM25
+misses semantic queries — "corporate account says not authorized" doesn't
+keyword-match R29's chunk reliably.
+
+Hybrid search with Reciprocal Rank Fusion combines both:
+
+```
+BM25 result list:    [R29, R05, R10, ...]    ← exact keyword match
+Vector result list:  [R10, R29, R07, ...]    ← semantic similarity
+
+RRF score = 1/(rank_in_bm25 + k) + 1/(rank_in_vector + k)
+R29 appears in both → highest combined score
+```
+
+### Query-type aware weighting
+
+Explicit code queries ("return window for R07") get heavier BM25 weight
+(`bm25_k=10` vs default `60`). This guarantees the named code appears
+first regardless of vector similarity scores.
+
+Semantic queries ("what happens when customer says unauthorized") use equal
+weighting — semantic understanding matters more than keyword matching.
+
+### Clause chunking
+
+Nacha documentation is structured as legal clauses — one entry per return
+code with its own definition, return window, and retry rules. Clause
+splitting respects these natural boundaries rather than cutting at arbitrary
+character counts.
+
+Each chunk is self-contained: R07's chunk contains everything about R07.
+No partial information split across boundaries.
+
+### R61-R85 exclusion
+
+Dishonored return codes (R61-R85) are bank-to-bank correction codes that
+nobody queries in normal payment operations. Including them polluted
+results because their content is dense with "return" language, scoring
+high on both BM25 and vector search for any question containing "return."
+
+They remain in the database — just excluded from the searchable index.
+
+---
+
+## Evaluation (RAGAS)
+
+15-question test set covering retry eligibility, return windows, semantic
+queries, threshold questions, and edge cases. Scores after retriever
+improvements:
+
+| Metric              | Clause | Recursive | Winner    |
+|---------------------|--------|-----------|-----------|
+| Faithfulness        | 0.829  | 0.818     | Clause    |
+| Context Precision   | 0.442  | 0.582     | Recursive |
+| Context Recall      | 0.603  | 0.559     | Clause    |
+| **Average**         | 0.625  | 0.653     | Recursive |
+
+**Why clause chunking is the production choice despite lower average:**
+
+Context Recall matters more than Context Precision for compliance-critical
+operational systems. Missing a return code causes Nacha violations (fines,
+enforcement, potential suspension). Retrieving extra context merely
+increases LLM token usage.
+
+Clause chunking's +8% recall improvement over recursive is worth the
+-14% precision cost for ACH payment operations.
+
+**Retriever improvements made during evaluation:**
+- Context Recall: 0.410 → 0.603 (+47%) via R61-R85 exclusion + injection
+- Faithfulness: 0.777 → 0.829 (+7%) via cleaner corpus
+- Found that recursive precision superiority comes from larger chunks
+  blending adjacent context — useful for comparison queries, not operational ones
+
+---
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| API framework | FastAPI |
+| Vector database | PostgreSQL 16 + pgvector (HNSW index) |
+| Keyword search | rank-bm25 (BM25Okapi, in-memory) |
+| Embedding model | BAAI/bge-small-en-v1.5 (local, 384 dims) |
+| LLM | Claude Haiku 4.5 (Anthropic API) |
+| Evaluation | RAGAS 0.4.3 |
+| Observability | Langfuse |
+| Containerization | Docker + docker-compose |
+| Deployment | GCP Cloud Run |
+| Package manager | uv |
+
+---
+
+## Project structure
+
+```
+fintech-rag/
+├── src/
+│   ├── ingestion/
+│   │   ├── fetcher.py      # downloads source documents
+│   │   ├── chunker.py      # clause + recursive splitting
+│   │   ├── embedder.py     # BGE vectorization
+│   │   └── ingestor.py     # PostgreSQL storage
+│   ├── retrieval/
+│   │   └── retriever.py    # hybrid BM25 + vector + RRF
+│   ├── api/
+│   │   ├── app.py          # FastAPI endpoints
+│   │   └── prompt.py       # system + query prompts
+│   └── db/
+│       └── schema.sql      # PostgreSQL schema
+├── eval/
+│   ├── test_dataset.py     # 15 ground-truth Q&A pairs
+│   └── evaluator.py        # RAGAS harness
+├── data/
+│   └── raw/                # fetched source documents
+├── tests/
+│   └── test_ingestion.py   # chunker + embedder + ingestor tests
+├── Dockerfile
+├── docker-compose.yml
+└── README.md
+```
+
+---
+
+## Quick start
+
+### With Docker (recommended)
+
+```bash
+# Clone and configure
+git clone https://github.com/ezhilan03/fintech-rag
+cd fintech-rag
+cp .env.example .env
+# Add your ANTHROPIC_API_KEY to .env
+
+# Start everything
+docker compose up
+
+# API is available at http://localhost:8000
+# Interactive docs at http://localhost:8000/docs
+```
+
+### Local development
+
+```bash
+# Prerequisites: Python 3.11+, uv, PostgreSQL 16 + pgvector
+
+# Install dependencies
+uv sync
+
+# Database setup
+pgstart  # or: pg_ctl -D /opt/homebrew/var/postgresql@16 start
+psql fintech_rag -f src/db/schema.sql
+
+# Fetch source documents and ingest
+uv run python src/ingestion/fetcher.py
+uv run python -c "from src.ingestion.ingestor import ingest_all_sources; ingest_all_sources()"
+
+# Start API
+PYTHONPATH=. uv run uvicorn src.api.app:app --reload --port 8000
+```
+
+### Example query
+
+```bash
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "can I retry an R29 return?"}'
+```
+
+```json
+{
+  "answer": "No. R29 (Corporate Customer Advises Not Authorized) cannot be retried without new written authorization. Retrying without new authorization is a Nacha violation.",
+  "sources": [{"return_code": "R29", "can_retry": false, "return_window": "2 banking days"}],
+  "retrieval_ms": 45,
+  "llm_ms": 823,
+  "total_ms": 868
+}
+```
+
+---
+
+## Data sources
+
+| Source | Coverage | Last fetched |
+|---|---|---|
+| achforbusiness.com | R01–R85 complete list | July 2026 |
+| plaid.com | Common codes + timing rules | May 2026 |
+| ramp.com | Operational guidance per code | July 2026 |
+| developers.achq.com | Structured table format | July 2026 |
+
+Sources are fetched fresh via `src/ingestion/fetcher.py`. Re-run to pick
+up Nacha rule changes — no code changes required.
+
+---
+
+## Domain expertise
+
+Built on 2+ years of production ACH payment operations experience:
+
+- ACH payment lifecycle (origination, settlement, returns)
+- Nacha operating rules and return reason codes (R01-R85)
+- Return rate thresholds (0.5% unauthorized, 3% administrative, 15% overall)
+- Retry rules and unauthorized return compliance requirements
+- EFT batch processing and merchant settlement operations
+
+Domain knowledge shaped every architectural decision — from clause chunking
+(matches Nacha document structure) to R61-R85 exclusion (operationally
+irrelevant to payment teams) to the test dataset (real operational questions).
+
+---
+
+## Author
+
+**Ezhilan Chinnasamy** — AI & Data Engineer  
+[LinkedIn](https://linkedin.com/in/ezhilan-chinnasamy) · [GitHub](https://github.com/ezhilan03)

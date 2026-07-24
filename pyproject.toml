@@ -1,0 +1,33 @@
+[project]
+name = "fintech-rag"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "fastapi>=0.128.8",
+    "httpx>=0.28.1",
+    "langchain>=0.3.30",
+    "langchain-anthropic>=0.3.22",
+    "langchain-community>=0.3.31",
+    "langchain-google-vertexai>=2.1.2",
+    "langchain-huggingface>=0.3.1",
+    "langchain-text-splitters>=0.3.11",
+    "langfuse>=3.7.0",
+    "pandas>=2.3.3",
+    "pgvector>=0.4.2",
+    "psycopg2-binary>=2.9.12",
+    "pydantic>=2.13.4",
+    "pymupdf>=1.26.5",
+    "python-dotenv>=1.2.1",
+    "ragas>=0.2.0",
+    "rank-bm25>=0.2.2",
+    "sentence-transformers>=5.1.2",
+    "uvicorn>=0.39.0",
+]
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
