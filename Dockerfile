@@ -21,7 +21,6 @@ RUN uv run python -c "from sentence_transformers import SentenceTransformer; Sen
 
 # Copy application code
 COPY src/ ./src/
-COPY data/ ./data/
 
 # Make venv the active Python environment
 ENV PATH="/app/.venv/bin:$PATH"
