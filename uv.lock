@@ -1555,6 +1555,10 @@ dev = [
     { name = "pytest", version = "9.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
 ingestion-test = [
+    { name = "anthropic" },
+    { name = "fastapi", version = "0.128.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "fastapi", version = "0.139.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "httpx" },
     { name = "langchain-text-splitters", version = "0.3.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "langchain-text-splitters", version = "1.1.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "numpy", version = "2.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
@@ -1598,6 +1602,9 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8,<10" }]
 ingestion-test = [
+    { name = "anthropic", specifier = ">=0.119.0" },
+    { name = "fastapi", specifier = ">=0.128.8" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "langchain-text-splitters", specifier = ">=0.3.11" },
     { name = "numpy", specifier = ">=2.0.2" },
     { name = "pgvector", specifier = ">=0.4.2" },

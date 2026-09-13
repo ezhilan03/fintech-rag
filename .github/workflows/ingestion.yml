@@ -1,4 +1,4 @@
-name: Ingestion reliability
+name: Ingestion and API contracts
 on:
   pull_request:
   push:

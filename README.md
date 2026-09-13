@@ -285,3 +285,37 @@ disposable PostgreSQL 16 + pgvector database; they never call a paid model or
 use `DATABASE_URL` as the test target. Run `uv sync --frozen --only-group ingestion-test`, then set `RAG_TEST_DATABASE_URL` and run
 `uv run --no-sync pytest tests -q`. The same checks run in GitHub Actions.
 Interactive source/model examples are in `tests/manual_ingestion_demo.py`.
+
+
+### Query and citation contract
+
+`POST /query` accepts a nonblank question of at most 2,000 characters, `strategy`
+(`clause` or `recursive`), and integer `top_k` from 1–10. Both retrieval options
+are honored per request. The supported model is `claude-haiku-4-5`; arbitrary
+model selection and unknown request fields return 422.
+
+Responses add `status` (`answered` or `insufficient_evidence`) and
+`cited_source_ids`. Source entries have response-local citation IDs (`S1`, etc.),
+chunk IDs, archived version IDs and chunk positions, source-byte hashes, and hashes
+of the exact text sent as evidence. Legacy provenance fields may be null.
+The context is bounded to 24,000 content characters total and 6,000 per chunk;
+these are character limits, not an exact token budget. Source previews are shorter.
+
+The answer service submits a structured tool result. Answered responses require
+nonempty citation IDs that resolve to the supplied evidence and match inline
+markers such as `[S1]`. Missing/unknown references, malformed results and truncated
+output return 502 without returning the unverified answer. No evidence produces
+a deterministic abstention without a model call. Model abstentions are normalized
+to the same message. This validates references, not semantic support for each
+claim or immunity to prompt injection; fixed model-quality evaluation remains open.
+
+Provider calls have a 30-second timeout and no automatic retries. Provider timeout,
+rate limit and other API failures map to 504, 503 and 502. Database failures map
+to 503. Error responses omit raw provider/database details. Sync retrieval and SDK
+calls execute in worker threads. `/health` checks dependency initialization and
+live database access; it does not make a paid provider request.
+
+API tests use the SDK's message schema with controlled responses, including two
+conflicting evidence snippets, unknown/missing citations, malformed output,
+abstention, context bounds, request validation and upstream errors. They do not
+measure live model answer quality. CI runs these alongside PostgreSQL regressions.

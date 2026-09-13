@@ -220,3 +220,18 @@ def test_first_failure_leaves_no_document(db):
     with pytest.raises(RuntimeError):
         ingest(db)
     assert rows(conn, 'SELECT count(*) FROM documents') == [(0,)]
+
+
+def test_request_options_provenance_and_default_isolation(db):
+    _, source, embedder = db
+    ingest(db)
+    recursive = ingest(db, strategy='recursive')
+    retriever = HybridRetriever(embedder=embedder)
+    results = retriever.retrieve('R01', strategy='recursive', top_k=1)
+    assert len(results) == 1
+    assert results[0].version_id == recursive['version_id']
+    assert results[0].chunk_index is not None
+    import hashlib
+    assert results[0].source_sha256 == hashlib.sha256(source.read_bytes()).hexdigest()
+    assert retriever.strategy == 'clause' and retriever.top_k == 5
+    assert retriever.retrieve('R01')[0].version_id != recursive['version_id']

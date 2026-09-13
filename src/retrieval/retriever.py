@@ -42,6 +42,9 @@ class RetrievalResult:
     vector_score:    float
     bm25_rank:       int
     rrf_score:       float
+    version_id:      Optional[int] = None
+    source_sha256:   Optional[str] = None
+    chunk_index:     Optional[int] = None
 
 
 # ── Retriever ─────────────────────────────────────────────────────────────────
@@ -96,7 +99,7 @@ class HybridRetriever:
                 """
                 SELECT c.id, c.content, c.return_code,
                        c.return_category, c.return_window,
-                       c.can_retry, c.max_retries, d.filename
+                       c.can_retry, c.max_retries, d.filename, c.version_id, d.content_sha256, c.chunk_index
                 FROM chunks c
                 JOIN documents d ON c.document_id = d.id
                 WHERE c.strategy = %s
@@ -165,7 +168,7 @@ class HybridRetriever:
                     """
                     SELECT c.id, c.content, c.return_code,
                            c.return_category, c.return_window,
-                           c.can_retry, c.max_retries, d.filename
+                           c.can_retry, c.max_retries, d.filename, c.version_id, d.content_sha256, c.chunk_index
                     FROM chunks c
                     JOIN documents d ON c.document_id = d.id
                     WHERE c.strategy = %s
@@ -186,6 +189,9 @@ class HybridRetriever:
                         can_retry       = row[5],
                         max_retries     = row[6],
                         source_doc      = row[7],
+                        version_id      = row[8],
+                        source_sha256   = row[9],
+                        chunk_index     = row[10],
                         vector_score    = 1.0,
                         bm25_rank       = 0,
                         rrf_score       = 1.0,
@@ -293,18 +299,37 @@ class HybridRetriever:
 
         return deduped
 
-    def retrieve(self, query: str) -> list[RetrievalResult]:
+    def check_ready(self):
+        # Do not use the cached corpus as evidence that the database is live.
+        conn = psycopg2.connect(os.environ["DATABASE_URL"], connect_timeout=5)
+        try:
+            with conn, conn.cursor() as cur:
+                cur.execute("SET LOCAL statement_timeout = '5s'")
+                cur.execute("SELECT count(*) FROM chunks")
+                return cur.fetchone()[0]
+        finally:
+            conn.close()
+
+    def retrieve(self, query: str, *, strategy=None, top_k=None) -> list[RetrievalResult]:
         # BM25, vector search and explicit-code lookup must see the same
         # committed corpus, even while another process activates a revision.
+        if strategy is not None and strategy not in {"clause", "recursive"}:
+            raise ValueError("Unsupported strategy")
+        if top_k is not None and (type(top_k) is not int or not 1 <= top_k <= 10):
+            raise ValueError("top_k must be between 1 and 10")
         with self._query_lock:
             conn = self._get_connection()
             conn.set_session(isolation_level="REPEATABLE READ", readonly=True)
             self._snapshot_conn = conn
+            previous = self.strategy, self.top_k
+            self.strategy = strategy or self.strategy
+            self.top_k = top_k if top_k is not None else self.top_k
             try:
                 with conn:
                     self._load_chunks()
                     return self._retrieve(query)
             finally:
+                self.strategy, self.top_k = previous
                 self._snapshot_conn = None
                 conn.close()
 
@@ -360,6 +385,9 @@ class HybridRetriever:
                 can_retry       = row[5],
                 max_retries     = row[6],
                 source_doc      = row[7],
+                        version_id      = row[8],
+                        source_sha256   = row[9],
+                        chunk_index     = row[10],
                 vector_score    = vector_score_map.get(chunk_id, 0.0),
                 bm25_rank       = bm25_rank_map.get(chunk_id, 999),
                 rrf_score       = rrf_score,
