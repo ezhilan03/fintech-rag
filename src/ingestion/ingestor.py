@@ -1,209 +1,111 @@
-# src/ingestion/ingestor.py
+"""Versioned document ingestion with atomic activation and safe reruns.
+
+Filename is the stable source identity. Supply distinct source_id values for
+unrelated files with the same basename. Source disappearance is not deletion.
 """
-Stores EmbeddedChunk objects into PostgreSQL.
-
-Tables written to:
-  documents — one row per source file, tracks what's been ingested
-  chunks    — one row per chunk, stores content + embedding + metadata
-
-Design principles:
-  Idempotent — safe to run multiple times, won't create duplicates
-  Transactional — all chunks for a document commit together or not at all
-  Observable — prints progress so you know what's happening
-"""
-
 from __future__ import annotations
+import hashlib
+import json
+import math
 import os
-import psycopg2
-from psycopg2.extras import execute_values
-from pgvector.psycopg2 import register_vector
-from dotenv import load_dotenv
+from dataclasses import asdict
 from pathlib import Path
 
+import psycopg2
+from psycopg2.extras import execute_values, Json
+from dotenv import load_dotenv
 from src.ingestion.chunker import chunk_document
-from src.ingestion.embedder import Embedder, EmbeddedChunk
+from src.ingestion.embedder import Embedder
 
 load_dotenv()
 
 
-# ── Database connection ───────────────────────────────────────────────────────
-
 def get_connection():
-    """
-    Opens a PostgreSQL connection using DATABASE_URL from .env
-
-    psycopg2 is Python's standard PostgreSQL driver.
-    It translates Python types → SQL types and back.
-
-    After connecting, register_vector() teaches psycopg2 how to
-    serialize Python lists as pgvector's vector type.
-    Without this, inserting embeddings would raise a type error.
-    """
-    conn = psycopg2.connect(os.getenv("DATABASE_URL"))
-    register_vector(conn)   # one-time call per connection — enables vector type
-    return conn
+    return psycopg2.connect(os.environ["DATABASE_URL"])
 
 
-# ── Document insertion ────────────────────────────────────────────────────────
-
-def insert_document(cursor, filename: str, source_type: str) -> int:
-    """
-    Inserts a document record and returns its auto-generated ID.
-
-    ON CONFLICT DO NOTHING — if the filename already exists, skip silently.
-    RETURNING id — PostgreSQL sends back the ID immediately, whether
-    the row was just inserted or already existed.
-
-    Why do we need the ID?
-    Every chunk row has a document_id foreign key pointing to its parent.
-    The ID connects chunks back to their source document.
-    """
-    cursor.execute(
-        """
-        INSERT INTO documents (filename, source_type)
-        VALUES (%s, %s)
-        ON CONFLICT (filename) DO NOTHING
-        RETURNING id
-        """,
-        (filename, source_type)
-    )
-    row = cursor.fetchone()
-
-    if row:
-        return row[0]   # freshly inserted — return new ID
-
-    # ON CONFLICT DO NOTHING means RETURNING returns nothing on conflict.
-    # We need to fetch the existing ID separately.
-    cursor.execute(
-        "SELECT id FROM documents WHERE filename = %s",
-        (filename,)
-    )
-    return cursor.fetchone()[0]
+def apply_schema(conn):
+    with conn.cursor() as cur:
+        cur.execute((Path(__file__).parents[1] / "db/schema.sql").read_text())
 
 
-# ── Chunk insertion ───────────────────────────────────────────────────────────
-
-def insert_chunks(
-    cursor,
-    embedded_chunks: list[EmbeddedChunk],
-    document_id: int,
-) -> int:
-    """
-    Bulk inserts all chunks for one document.
-
-    execute_values() — inserts all rows in one SQL statement.
-    Much faster than calling cursor.execute() in a loop.
-    For 86 chunks: 1 database round trip instead of 86.
-
-    The embedding is stored as a pgvector vector type.
-    register_vector() (called at connection time) handles the conversion
-    from Python list → PostgreSQL vector automatically.
-    """
-    rows = [
-        (
-            document_id,
-            ec.content,
-            ec.return_code,
-            ec.return_category,
-            ec.return_window,
-            ec.can_retry,
-            ec.max_retries,
-            ec.embedding,   # list[float] → vector(384) via registered adapter
-            ec.strategy,
-        )
-        for ec in embedded_chunks
-    ]
-
-    execute_values(
-        cursor,
-        """
-        INSERT INTO chunks (
-            document_id,
-            content,
-            return_code,
-            return_category,
-            return_window,
-            can_retry,
-            max_retries,
-            embedding,
-            strategy
-        ) VALUES %s
-        """,
-        rows,
-    )
-    return len(rows)
-
-
-# ── Main ingest pipeline ──────────────────────────────────────────────────────
-
-def ingest_source(
-    filepath: str,
-    source_type: str,
-    strategy: str = "clause",
-    embedder: Embedder | None = None,
-) -> dict:
-    """
-    Full pipeline for one source file:
-      read → chunk → embed → store
-
-    Args:
-        filepath:    Path to a .txt file in data/raw/
-        source_type: Label stored in documents table ("nacha_reference" etc.)
-        strategy:    "clause" or "recursive"
-        embedder:    Pass an existing Embedder to reuse the loaded model.
-                     If None, loads a new one (slow — 2 seconds per load).
-
-    Returns:
-        dict with counts of what was inserted.
-
-    Transaction design:
-        conn.commit() only runs after ALL chunks are inserted successfully.
-        If anything fails mid-way, conn.rollback() undoes everything.
-        You never end up with a half-ingested document.
-    """
-    filename = Path(filepath).name
-
-    if embedder is None:
-        embedder = Embedder()
-
-    print(f"\n{'='*50}")
-    print(f"Ingesting: {filename}")
-    print(f"Strategy:  {strategy}")
-
-    # Step 1 — Chunk
-    print("Chunking...")
-    chunks = chunk_document(
-        filepath,
-        source_doc=filename,
-        strategy=strategy,
-        is_file=True,
-    )
-    print(f"  → {len(chunks)} chunks")
-
-    # Step 2 — Embed
-    print("Embedding...")
-    embedded = embedder.embed_chunks(chunks, show_progress=True)
-    print(f"  → {len(embedded)} vectors generated")
-
-    # Step 3 — Store
-    print("Storing to PostgreSQL...")
+def ingest_source(filepath, source_type, strategy="clause", embedder=None, *, source_id=None):
+    if strategy not in {"clause", "recursive"}:
+        raise ValueError("Unsupported chunking strategy")
+    filename = source_id or Path(filepath).name
+    if not filename or not source_type:
+        raise ValueError("Source identity and type are required")
+    # Read once: the hash, stored source and chunker see identical bytes.
+    raw = Path(filepath).read_bytes()
+    text = raw.decode("utf-8")
+    if not text.strip():
+        raise ValueError("Empty source cannot replace an active document")
+    digest = hashlib.sha256(raw).hexdigest()
+    embedder = embedder or Embedder()
+    pipeline = {
+        "model": embedder.model_name,
+        "dimensions": embedder.dimensions,
+        "chunker_sha256": hashlib.sha256(Path(__file__).with_name("chunker.py").read_bytes()).hexdigest(),
+        "embedder_sha256": hashlib.sha256(Path(__file__).with_name("embedder.py").read_bytes()).hexdigest(),
+        "dependencies_sha256": hashlib.sha256(Path(__file__).parents[2].joinpath("uv.lock").read_bytes()).hexdigest(),
+        "source_type": source_type,
+        "strategy": strategy,
+    }
+    fingerprint = hashlib.sha256(json.dumps([digest, pipeline], sort_keys=True).encode()).hexdigest()
     conn = get_connection()
     try:
-        with conn.cursor() as cur:
-            doc_id = insert_document(cur, filename, source_type)
-            n_inserted = insert_chunks(cur, embedded, doc_id)
-        conn.commit()
-        print(f"  → document_id={doc_id}, {n_inserted} chunks stored")
-        return {
-            "filename":   filename,
-            "document_id": doc_id,
-            "chunks":     n_inserted,
-            "strategy":   strategy,
-        }
-    except Exception as e:
-        conn.rollback()
-        print(f"  ✗ Failed: {e}")
-        raise
+        with conn, conn.cursor() as cur:
+            # One writer per source, including absent documents. Different sources
+            # proceed independently; locks release on commit, rollback or disconnect.
+            key = int.from_bytes(hashlib.sha256(filename.encode()).digest()[:8], "big", signed=True)
+            cur.execute("SELECT pg_advisory_xact_lock(%s)", (key,))
+            cur.execute("INSERT INTO documents(filename,source_type) VALUES (%s,%s) ON CONFLICT(filename) DO NOTHING", (filename,source_type))
+            cur.execute("SELECT id,content_sha256 FROM documents WHERE filename=%s FOR UPDATE", (filename,))
+            doc_id, current_hash = cur.fetchone()
+            cur.execute("SELECT id,chunks FROM document_versions WHERE document_id=%s AND strategy=%s AND fingerprint=%s", (doc_id,strategy,fingerprint))
+            prior = cur.fetchone()
+            if prior:
+                version_id, snapshot = prior
+                cur.execute("SELECT count(*),count(*) FILTER (WHERE version_id=%s) FROM chunks WHERE document_id=%s AND strategy=%s", (version_id,doc_id,strategy))
+                total, matching = cur.fetchone()
+                if current_hash == digest and total == matching == len(snapshot):
+                    return dict(filename=filename, document_id=doc_id, version_id=version_id, chunks=0, strategy=strategy, replayed=True)
+            else:
+                chunks = chunk_document(text, source_doc=filename, strategy=strategy, is_file=False)
+                if not chunks:
+                    raise ValueError("Source produced no chunks")
+                embedded = embedder.embed_chunks(chunks, show_progress=False)
+                if len(embedded) != len(chunks):
+                    raise ValueError("Incomplete embedding batch")
+                snapshot = []
+                for expected, ec in zip(chunks, embedded):
+                    vector = [float(v) for v in ec.embedding]
+                    if ec.chunk != expected or len(vector) != 384 or not all(math.isfinite(v) for v in vector) or not any(vector):
+                        raise ValueError("Invalid embedding contract")
+                    snapshot.append(dict(asdict(expected), embedding=vector))
+                cur.execute("INSERT INTO document_versions(document_id,strategy,fingerprint,content_sha256,source_text,pipeline,chunks) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id", (doc_id,strategy,fingerprint,digest,text,Json(pipeline),Json(snapshot)))
+                version_id = cur.fetchone()[0]
+            # Keep an explicitly unverified legacy snapshot before replacing old
+            # unversioned rows. Original raw bytes/model provenance are unknown.
+            cur.execute("""INSERT INTO document_versions
+                (document_id,strategy,fingerprint,content_sha256,source_text,pipeline,chunks)
+                SELECT document_id,COALESCE(strategy,'legacy'), 'legacy-unversioned',
+                       'unknown', string_agg(content,E'\\n' ORDER BY id),
+                       '{"legacy":true,"source_bytes_verified":false}'::jsonb,
+                       jsonb_agg(to_jsonb(chunks) ORDER BY id)
+                FROM chunks WHERE document_id=%s AND version_id IS NULL
+                GROUP BY document_id,strategy
+                ON CONFLICT(document_id,strategy,fingerprint) DO NOTHING""", (doc_id,))
+            # Changed source invalidates every strategy from the old source.
+            # Same source replaces only the requested strategy/pipeline.
+            if current_hash != digest:
+                cur.execute("DELETE FROM chunks WHERE document_id=%s", (doc_id,))
+            else:
+                cur.execute("DELETE FROM chunks WHERE document_id=%s AND strategy=%s", (doc_id,strategy))
+            rows = [(doc_id,c['content'],c['return_code'],c['return_category'],c['return_window'],c['can_retry'],c['max_retries'],c['embedding'],strategy,version_id,c['chunk_index']) for c in snapshot]
+            execute_values(cur, "INSERT INTO chunks(document_id,content,return_code,return_category,return_window,can_retry,max_retries,embedding,strategy,version_id,chunk_index) VALUES %s", rows)
+            cur.execute("UPDATE documents SET content_sha256=%s,source_type=%s,ingested_at=now() WHERE id=%s", (digest,source_type,doc_id))
+            return dict(filename=filename, document_id=doc_id, version_id=version_id, chunks=len(rows), strategy=strategy, replayed=False)
     finally:
         conn.close()
 
@@ -220,14 +122,20 @@ def ingest_all_sources(strategy: str = "clause") -> list[dict]:
         ("data/raw/achq_developer_docs.txt",        "nacha_reference"),
     ]
 
+    missing = [filepath for filepath, _ in sources if not Path(filepath).is_file()]
+    if missing:
+        raise FileNotFoundError("Missing configured source files: " + ", ".join(missing))
+    conn = get_connection()
+    try:
+        with conn:
+            apply_schema(conn)
+    finally:
+        conn.close()
     # Load model once — reuse across all files
     embedder = Embedder()
     results = []
 
     for filepath, source_type in sources:
-        if not Path(filepath).exists():
-            print(f"Skipping {filepath} — file not found")
-            continue
         result = ingest_source(filepath, source_type, strategy, embedder)
         results.append(result)
 

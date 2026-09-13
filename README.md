@@ -153,7 +153,7 @@ fintech-rag/
 ├── data/
 │   └── raw/                # fetched source documents
 ├── tests/
-│   └── test_ingestion.py   # chunker + embedder + ingestor tests
+│   └── test_versioned_ingestion.py # isolated PostgreSQL regression tests
 ├── Dockerfile
 ├── docker-compose.yml
 └── README.md
@@ -253,3 +253,35 @@ irrelevant to payment teams) to the test dataset (real operational questions).
 
 **Ezhilan Chinnasamy** — AI & Data Engineer  
 [LinkedIn](https://linkedin.com/in/ezhilan-chinnasamy) · [GitHub](https://github.com/ezhilan03)
+
+
+### Versioned ingestion reliability
+
+`ingest_source` treats the filename as a stable source identity. Use `source_id=`
+when unrelated vendors share a filename. It snapshots UTF-8 source bytes once,
+fingerprints the source, strategy, model identifier, code and dependency lock,
+and serializes writers per source using a PostgreSQL transaction lock.
+
+An identical active revision is a no-op. An update commits its revision archive
+and active chunks together; failures leave the previous revision active. A source
+change retires all strategies built from its previous text. A strategy/model
+change replaces that strategy. Re-ingesting a historical source reactivates its
+archived revision. Missing/empty sources are errors, not implicit deletion.
+
+`src/db/schema.sql` is additive and can be reapplied to an existing database.
+Pre-existing unversioned chunks are preserved by bootstrap and archived on their
+first replacement, explicitly marked as lacking verified source provenance.
+No original source bytes or model identity are invented for legacy data.
+
+Retrieval reloads the small demo corpus under a repeatable-read transaction for
+each query, keeping BM25, vector search and explicit-code lookup consistent.
+Queries on one retriever instance are serialized; larger-corpus caching/pooling
+is future performance work. Revision history currently has no retention policy.
+Model identifiers are recorded; pinning exact upstream model weights remains a
+release task. This milestone does not establish answer quality or deployment.
+
+Automated tests use deterministic test vectors and an explicitly configured,
+disposable PostgreSQL 16 + pgvector database; they never call a paid model or
+use `DATABASE_URL` as the test target. Run `uv sync --frozen --only-group ingestion-test`, then set `RAG_TEST_DATABASE_URL` and run
+`uv run --no-sync pytest tests -q`. The same checks run in GitHub Actions.
+Interactive source/model examples are in `tests/manual_ingestion_demo.py`.

@@ -18,7 +18,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 import numpy as np
-from sentence_transformers import SentenceTransformer
 from src.ingestion.chunker import Chunk
 
 
@@ -72,6 +71,7 @@ class Embedder:
     def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5"):
         print(f"Loading embedding model: {model_name}")
         print("(First run downloads ~130MB — cached after that)")
+        from sentence_transformers import SentenceTransformer
         self.model = SentenceTransformer(model_name)
         self.model_name = model_name
         self.dimensions = self.model.get_embedding_dimension()

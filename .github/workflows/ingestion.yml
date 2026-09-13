@@ -1,0 +1,33 @@
+name: Ingestion reliability
+on:
+  pull_request:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: integration-test-only
+          POSTGRES_DB: ragtest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ragtest"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.8.22'
+          python-version: '3.11'
+      - run: uv sync --frozen --only-group ingestion-test
+      - run: uv run --no-sync pytest tests -q
+        env:
+          RAG_TEST_DATABASE_URL: postgresql://postgres:integration-test-only@localhost:5432/ragtest

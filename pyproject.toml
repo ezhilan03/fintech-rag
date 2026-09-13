@@ -31,3 +31,17 @@ package = false
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<10",
+]
+ingestion-test = [
+    "langchain-text-splitters>=0.3.11",
+    "numpy>=2.0.2",
+    "pgvector>=0.4.2",
+    "psycopg2-binary>=2.9.12",
+    "pytest>=8.4.2",
+    "python-dotenv>=1.2.1",
+    "rank-bm25>=0.2.2",
+]

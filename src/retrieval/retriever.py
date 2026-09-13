@@ -14,6 +14,7 @@ Key improvements over naive retrieval:
 from __future__ import annotations
 import os
 import re
+import threading
 import psycopg2
 from pgvector.psycopg2 import register_vector
 from rank_bm25 import BM25Okapi
@@ -55,6 +56,8 @@ class HybridRetriever:
         rrf_k: int = 60,
         similarity_threshold: float = 0.75,
     ):
+        self._snapshot_conn = None
+        self._query_lock = threading.RLock()
         self.top_k = top_k
         self.rrf_k = rrf_k
         self.strategy = strategy
@@ -66,8 +69,11 @@ class HybridRetriever:
         print(f"Retriever ready — {len(self.chunks)} chunks indexed")
 
     def _get_connection(self):
+        if self._snapshot_conn is not None:
+            return self._snapshot_conn
         conn = psycopg2.connect(os.getenv("DATABASE_URL"))
         register_vector(conn)
+        conn.commit()  # Type registration queries must precede snapshot setup.
         return conn
 
     def _load_chunks(self):
@@ -100,11 +106,12 @@ class HybridRetriever:
                 (self.strategy,)
             )
             rows = cur.fetchall()
-        conn.close()
+        if self._snapshot_conn is None:
+            conn.close()
 
         self.chunks = rows
         tokenized = [row[1].lower().split() for row in rows]
-        self.bm25 = BM25Okapi(tokenized)
+        self.bm25 = BM25Okapi(tokenized) if tokenized else None
         self.id_to_index = {row[0]: i for i, row in enumerate(rows)}
 
     def _is_explicit_code_query(self, query: str) -> bool:
@@ -183,7 +190,8 @@ class HybridRetriever:
                         bm25_rank       = 0,
                         rrf_score       = 1.0,
                     ))
-        conn.close()
+        if self._snapshot_conn is None:
+            conn.close()
         return (injected + results)[:self.top_k]
 
     def _vector_search(
@@ -209,7 +217,8 @@ class HybridRetriever:
                 (query_vector, self.strategy, query_vector, fetch_k)
             )
             results = cur.fetchall()
-        conn.close()
+        if self._snapshot_conn is None:
+            conn.close()
 
         return [
             (row[0], float(row[1]))
@@ -222,6 +231,8 @@ class HybridRetriever:
         query: str,
         fetch_k: int = 20,
     ) -> list[tuple[int, float]]:
+        if self.bm25 is None:
+            return []
         tokenized_query = query.lower().split()
         scores = self.bm25.get_scores(tokenized_query)
         scored = [
@@ -283,6 +294,21 @@ class HybridRetriever:
         return deduped
 
     def retrieve(self, query: str) -> list[RetrievalResult]:
+        # BM25, vector search and explicit-code lookup must see the same
+        # committed corpus, even while another process activates a revision.
+        with self._query_lock:
+            conn = self._get_connection()
+            conn.set_session(isolation_level="REPEATABLE READ", readonly=True)
+            self._snapshot_conn = conn
+            try:
+                with conn:
+                    self._load_chunks()
+                    return self._retrieve(query)
+            finally:
+                self._snapshot_conn = None
+                conn.close()
+
+    def _retrieve(self, query: str) -> list[RetrievalResult]:
         """
         Main retrieval method.
 
