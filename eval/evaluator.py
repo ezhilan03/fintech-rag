@@ -1,6 +1,9 @@
 # eval/evaluator.py
 """
-RAGAS evaluation harness for the Fintech RAG system.
+Legacy RAGAS exploration harness; not the current API release gate.
+
+The current fixed grounding check is python -m eval.grounding. This legacy
+script uses the older free-text prompt and makes extra paid judging calls.
 
 Compares two chunking strategies:
   clause    — one chunk per return code entry (production)

@@ -319,3 +319,33 @@ API tests use the SDK's message schema with controlled responses, including two
 conflicting evidence snippets, unknown/missing citations, malformed output,
 abstention, context bounds, request validation and upstream errors. They do not
 measure live model answer quality. CI runs these alongside PostgreSQL regressions.
+
+### Fixed answer-grounding evaluation
+
+`uv run --no-sync python -m eval.grounding` runs the offline harness replay.
+`uv run --no-sync python -m eval.grounding --live` uses the existing Haiku model
+and requires the app's configured `ANTHROPIC_API_KEY`. Install the locked
+`ingestion-test` dependency group for either mode. Generated reports are ignored
+under `eval/results/` and identify their mode, fixture/code hashes and Git revision.
+
+The eight fixed synthetic cases cover a counterfactual retry limit, semantic
+wording, comparisons, conflicting sources, absent evidence, missing facts, and
+instructions embedded in both source text and a question. They exercise the real
+HTTP handler/prompt/citation validator with controlled source contexts. They are
+not Nacha guidance and do not measure retrieval quality. Expected answers are
+never sent to the model. Replay supplies fixture answers solely to test harness
+wiring; it is explicitly labelled NOT model quality.
+
+Live mode uses no LLM judge, no automatic retries and at most one generation per
+nonempty case. Before generation it counts input tokens and reserves estimated
+input plus maximum output cost. The default run budget is $0.15; the harness
+refuses budgets above $0.25 and retains reservations after uncertain failures.
+Rates are $1/$5 per million input/output tokens for standard first-party Haiku 4.5,
+checked September 13, 2026 against [Anthropic pricing](https://www.anthropic.com/claude/haiku).
+This is a run-level estimate/control, not an account billing cap or tax-inclusive
+invoice. Verify rates before future use. Provider usage and estimates are recorded.
+
+Pattern and citation checks detect selected regressions. Live reports still require
+human semantic review before making answer-quality claims. The old `eval/evaluator.py`
+uses the earlier prompt and extra RAGAS judging calls; it is retained as historical
+exploration and is not the current API release gate.
