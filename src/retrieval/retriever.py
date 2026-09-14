@@ -6,7 +6,7 @@ fused with Reciprocal Rank Fusion (RRF).
 Key improvements over naive retrieval:
   - Query-type aware weighting: explicit code queries boost BM25
   - R61-R85 excluded: dishonored/correction codes pollute results
-  - Deduplication: one result per return code
+  - Deduplication: identical excerpts per source, preserving vendor disagreement
   - Injection: guarantees explicitly named codes appear in results
   - Similarity threshold: drops irrelevant vector results
 """
@@ -14,6 +14,7 @@ Key improvements over naive retrieval:
 from __future__ import annotations
 import os
 import re
+import threading
 import psycopg2
 from pgvector.psycopg2 import register_vector
 from rank_bm25 import BM25Okapi
@@ -41,6 +42,9 @@ class RetrievalResult:
     vector_score:    float
     bm25_rank:       int
     rrf_score:       float
+    version_id:      Optional[int] = None
+    source_sha256:   Optional[str] = None
+    chunk_index:     Optional[int] = None
 
 
 # ── Retriever ─────────────────────────────────────────────────────────────────
@@ -55,6 +59,8 @@ class HybridRetriever:
         rrf_k: int = 60,
         similarity_threshold: float = 0.75,
     ):
+        self._snapshot_conn = None
+        self._query_lock = threading.RLock()
         self.top_k = top_k
         self.rrf_k = rrf_k
         self.strategy = strategy
@@ -66,8 +72,11 @@ class HybridRetriever:
         print(f"Retriever ready — {len(self.chunks)} chunks indexed")
 
     def _get_connection(self):
+        if self._snapshot_conn is not None:
+            return self._snapshot_conn
         conn = psycopg2.connect(os.getenv("DATABASE_URL"))
         register_vector(conn)
+        conn.commit()  # Type registration queries must precede snapshot setup.
         return conn
 
     def _load_chunks(self):
@@ -90,7 +99,7 @@ class HybridRetriever:
                 """
                 SELECT c.id, c.content, c.return_code,
                        c.return_category, c.return_window,
-                       c.can_retry, c.max_retries, d.filename
+                       c.can_retry, c.max_retries, d.filename, c.version_id, d.content_sha256, c.chunk_index
                 FROM chunks c
                 JOIN documents d ON c.document_id = d.id
                 WHERE c.strategy = %s
@@ -100,11 +109,12 @@ class HybridRetriever:
                 (self.strategy,)
             )
             rows = cur.fetchall()
-        conn.close()
+        if self._snapshot_conn is None:
+            conn.close()
 
         self.chunks = rows
-        tokenized = [row[1].lower().split() for row in rows]
-        self.bm25 = BM25Okapi(tokenized)
+        tokenized = [re.findall(r'[a-z0-9]+', row[1].lower()) for row in rows]
+        self.bm25 = BM25Okapi(tokenized) if tokenized else None
         self.id_to_index = {row[0]: i for i, row in enumerate(rows)}
 
     def _is_explicit_code_query(self, query: str) -> bool:
@@ -125,7 +135,7 @@ class HybridRetriever:
 
     def _extract_explicit_codes(self, query: str) -> list[str]:
         """Extract all return codes explicitly mentioned in the query."""
-        return list(set(re.findall(r'\bR\d{2}\b', query.upper())))
+        return sorted(set(re.findall(r'\bR\d{2}\b', query.upper())))
 
     def _inject_missing_codes(
         self,
@@ -158,7 +168,7 @@ class HybridRetriever:
                     """
                     SELECT c.id, c.content, c.return_code,
                            c.return_category, c.return_window,
-                           c.can_retry, c.max_retries, d.filename
+                           c.can_retry, c.max_retries, d.filename, c.version_id, d.content_sha256, c.chunk_index
                     FROM chunks c
                     JOIN documents d ON c.document_id = d.id
                     WHERE c.strategy = %s
@@ -179,11 +189,15 @@ class HybridRetriever:
                         can_retry       = row[5],
                         max_retries     = row[6],
                         source_doc      = row[7],
-                        vector_score    = 1.0,
+                        version_id      = row[8],
+                        source_sha256   = row[9],
+                        chunk_index     = row[10],
+                        vector_score    = 0.0,
                         bm25_rank       = 0,
                         rrf_score       = 1.0,
                     ))
-        conn.close()
+        if self._snapshot_conn is None:
+            conn.close()
         return (injected + results)[:self.top_k]
 
     def _vector_search(
@@ -209,7 +223,8 @@ class HybridRetriever:
                 (query_vector, self.strategy, query_vector, fetch_k)
             )
             results = cur.fetchall()
-        conn.close()
+        if self._snapshot_conn is None:
+            conn.close()
 
         return [
             (row[0], float(row[1]))
@@ -222,11 +237,13 @@ class HybridRetriever:
         query: str,
         fetch_k: int = 20,
     ) -> list[tuple[int, float]]:
-        tokenized_query = query.lower().split()
+        if self.bm25 is None:
+            return []
+        tokenized_query = re.findall(r'[a-z0-9]+', query.lower())
         scores = self.bm25.get_scores(tokenized_query)
         scored = [
             (self.chunks[i][0], float(scores[i]))
-            for i in range(len(scores))
+            for i in range(len(scores)) if scores[i] > 0
         ]
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:fetch_k]
@@ -267,22 +284,52 @@ class HybridRetriever:
         self,
         results: list[RetrievalResult],
     ) -> list[RetrievalResult]:
-        seen_codes: dict[str, RetrievalResult] = {}
-        seen_preamble = 0
+        seen = set()
         deduped = []
-
         for result in results:
-            if result.return_code is None:
-                if seen_preamble < 1:
-                    deduped.append(result)
-                    seen_preamble += 1
-            elif result.return_code not in seen_codes:
-                seen_codes[result.return_code] = result
+            # Preserve distinct vendors, including contradictory same-code rules.
+            key = result.source_doc, result.content
+            if key not in seen:
+                seen.add(key)
                 deduped.append(result)
 
         return deduped
 
-    def retrieve(self, query: str) -> list[RetrievalResult]:
+    def check_ready(self):
+        # Do not use the cached corpus as evidence that the database is live.
+        conn = psycopg2.connect(os.environ["DATABASE_URL"], connect_timeout=5)
+        try:
+            with conn, conn.cursor() as cur:
+                cur.execute("SET LOCAL statement_timeout = '5s'")
+                cur.execute("SELECT count(*) FROM chunks")
+                return cur.fetchone()[0]
+        finally:
+            conn.close()
+
+    def retrieve(self, query: str, *, strategy=None, top_k=None) -> list[RetrievalResult]:
+        # BM25, vector search and explicit-code lookup must see the same
+        # committed corpus, even while another process activates a revision.
+        if strategy is not None and strategy not in {"clause", "recursive"}:
+            raise ValueError("Unsupported strategy")
+        if top_k is not None and (type(top_k) is not int or not 1 <= top_k <= 10):
+            raise ValueError("top_k must be between 1 and 10")
+        with self._query_lock:
+            conn = self._get_connection()
+            conn.set_session(isolation_level="REPEATABLE READ", readonly=True)
+            self._snapshot_conn = conn
+            previous = self.strategy, self.top_k
+            self.strategy = strategy or self.strategy
+            self.top_k = top_k if top_k is not None else self.top_k
+            try:
+                with conn:
+                    self._load_chunks()
+                    return self._retrieve(query)
+            finally:
+                self.strategy, self.top_k = previous
+                self._snapshot_conn = None
+                conn.close()
+
+    def _retrieve(self, query: str) -> list[RetrievalResult]:
         """
         Main retrieval method.
 
@@ -291,7 +338,7 @@ class HybridRetriever:
           2. Vector search (pgvector HNSW)
           3. BM25 keyword search (in-memory)
           4. RRF fusion — query-type aware weighting
-          5. Deduplicate — one result per return code
+          5. Deduplicate identical excerpts within each source
           6. Slice to top_k
           7. Inject any explicitly named codes missing from top_k
         """
@@ -300,7 +347,7 @@ class HybridRetriever:
         bm25_results   = self._bm25_search(query, fetch_k=20)
 
         if not vector_results and not bm25_results:
-            return []
+            return self._inject_missing_codes([], query)
 
         if self._is_explicit_code_query(query):
             fused = self._rrf_fusion(
@@ -325,6 +372,9 @@ class HybridRetriever:
             if idx is None:
                 continue
             row = self.chunks[idx]
+            explicit_codes = self._extract_explicit_codes(query)
+            if explicit_codes and row[2] not in explicit_codes:
+                continue
             results.append(RetrievalResult(
                 chunk_id        = row[0],
                 content         = row[1],
@@ -334,6 +384,9 @@ class HybridRetriever:
                 can_retry       = row[5],
                 max_retries     = row[6],
                 source_doc      = row[7],
+                        version_id      = row[8],
+                        source_sha256   = row[9],
+                        chunk_index     = row[10],
                 vector_score    = vector_score_map.get(chunk_id, 0.0),
                 bm25_rank       = bm25_rank_map.get(chunk_id, 999),
                 rrf_score       = rrf_score,

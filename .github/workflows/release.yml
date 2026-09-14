@@ -1,0 +1,58 @@
+name: Release and verify AWS demo
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rag-aws-demo
+  cancel-in-progress: false
+jobs:
+  checks:
+    uses: ./.github/workflows/ingestion.yml
+  release:
+    needs: checks
+    if: github.ref == 'refs/heads/master'
+    environment: rag-release
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: us-east-1
+      RAG_INSTANCE_ID: ${{ vars.RAG_INSTANCE_ID }}
+      RAG_SSM_DOCUMENT: ${{ vars.RAG_SSM_DOCUMENT }}
+      RAG_BUCKET: ${{ vars.RAG_BUCKET }}
+      RAG_REPOSITORY: ${{ vars.RAG_REPOSITORY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.RAG_RELEASE_ROLE }}
+          aws-region: us-east-1
+      - uses: aws-actions/amazon-ecr-login@v2
+      - name: Publish immutable ARM production image
+        run: |
+          digest=$(aws ecr describe-images --repository-name fintech-rag-portfolio --image-ids imageTag="$GITHUB_SHA" --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)
+          if [ -z "$digest" ] || [ "$digest" = None ]; then
+            docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" --target production -t "$RAG_REPOSITORY:$GITHUB_SHA" .
+            docker push "$RAG_REPOSITORY:$GITHUB_SHA"
+            digest=$(aws ecr describe-images --repository-name fintech-rag-portfolio --image-ids imageTag="$GITHUB_SHA" --query 'imageDetails[0].imageDigest' --output text)
+          fi
+          export IMAGE_DIGEST="$digest"
+          python -c 'import json,os; print(json.dumps({"revision":os.environ["GITHUB_SHA"],"digest":os.environ["IMAGE_DIGEST"]}))' > manifest.json
+          aws s3 cp manifest.json "s3://$RAG_BUCKET/releases/$GITHUB_SHA/manifest.json"
+      - name: Verify live demo and stop it
+        run: python scripts/run_remote_demo.py
+      - name: Ensure demo is stopped even after cancellation or failure
+        if: always()
+        run: |
+          aws ec2 stop-instances --instance-ids "$RAG_INSTANCE_ID"
+          aws ec2 wait instance-stopped --instance-ids "$RAG_INSTANCE_ID"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aws-demo-evidence
+          path: |
+            manifest.json
+            cloud-verification.json

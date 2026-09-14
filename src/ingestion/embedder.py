@@ -18,7 +18,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 import numpy as np
-from sentence_transformers import SentenceTransformer
 from src.ingestion.chunker import Chunk
 
 
@@ -69,10 +68,13 @@ class Embedder:
     A class loads it once in __init__ and reuses it for all embed() calls.
     """
 
-    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5"):
+    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5",
+                 revision: str = "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"):
         print(f"Loading embedding model: {model_name}")
         print("(First run downloads ~130MB — cached after that)")
-        self.model = SentenceTransformer(model_name)
+        from sentence_transformers import SentenceTransformer
+        self.model = SentenceTransformer(model_name, revision=revision)
+        self.revision = revision
         self.model_name = model_name
         self.dimensions = self.model.get_embedding_dimension()
         print(f"Model ready — {self.dimensions} dimensions")

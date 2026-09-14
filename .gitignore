@@ -6,3 +6,7 @@ data/raw/
 eval/results/
 .DS_Store
 *.egg-info/
+.terraform/
+*.tfstate*
+*.tfvars
+*.tfplan
