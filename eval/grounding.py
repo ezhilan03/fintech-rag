@@ -73,6 +73,12 @@ class ReplayMessages:
 
     def create(self, **kwargs):
         case = self.retriever.case
+        if kwargs['tool_choice']['name'] == 'extract_comparison':
+            return SimpleNamespace(stop_reason='tool_use', content=[SimpleNamespace(
+                type='tool_use', name='extract_comparison', input={
+                    'status':case['expected_status'], 'quotes':[
+                        {'source_id':f'S{i}', 'quote':text}
+                        for i,text in enumerate(case['evidence'],1)]})])
         return SimpleNamespace(stop_reason='tool_use', content=[SimpleNamespace(
             type='tool_use', name='submit_answer', input={
                 'status': case['expected_status'], 'answer': case['example_answer'] or ABSTENTION,

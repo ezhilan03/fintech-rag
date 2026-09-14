@@ -42,3 +42,25 @@ production traffic. Full retrieval and deployment remain separate release gates.
 Raw reports retain commit, dirty-worktree status, fixture hashes and relevant code
 hashes. The baseline used the earlier fixture; the follow-up includes the new
 regression. Preserve both results rather than replacing the failed baseline.
+
+## Extractive comparison fix
+
+A third live run passed the unchanged eight-case fixture. Comparison requests now
+ask the model only to select source excerpts. The API verifies that every excerpt
+is an exact substring of the evidence for its declared source, rejects duplicate
+or incomplete selections and embedded citation markers, then renders quoted text
+in code. There is no model-authored comparison prose or new arithmetic in this
+path. Unsupported comparisons can abstain.
+
+Assistant inspection of all eight responses found the stated facts and citations
+consistent with the supplied fixtures. The comparison contains only the original
+four-day and eleven-day statements. The other cases retained expected abstention,
+conflict reporting and rejection of embedded instructions. Estimated usage for
+this run: $0.010802. Raw report: 2026-09-13-extractive-comparison.json.
+
+The specific observed comparison regression is resolved on this fixture; 76 local
+HTTP/PostgreSQL/harness tests pass. This is not an independent human review or a
+claim of general semantic reliability. Routing recognizes common comparison
+wording, not every possible paraphrase. Exact-quote validation proves textual
+provenance, not that the selected excerpts are complete or answer the question.
+Full retrieval and container/deployment gates remain outstanding.

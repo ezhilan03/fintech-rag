@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import hashlib
 import logging
+import json
 import re
 import time
 from typing import Literal
@@ -56,6 +57,56 @@ class GroundedAnswer(BaseModel):
     status: Literal['answered', 'insufficient_evidence']
     answer: str = Field(min_length=1, max_length=8000, strict=True)
     cited_source_ids: list[str] = Field(max_length=10)
+
+
+class EvidenceQuote(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    source_id: str
+    quote: str = Field(min_length=1, max_length=1500)
+
+
+class ComparisonEvidence(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    status: Literal['answered', 'insufficient_evidence']
+    quotes: list[EvidenceQuote] = Field(max_length=10)
+
+
+def comparison_requested(question):
+    return bool(re.search(
+        r'\b(compare|comparison|difference|differences|versus|vs)\b|'
+        r'\b(longer|shorter|faster|slower|more|less|greater|fewer)\b.{0,60}\bthan\b',
+        question, re.I))
+
+
+def checked_comparison(message, context):
+    if message.stop_reason != 'tool_use' or len(message.content) != 1:
+        raise ValueError('Expected complete comparison evidence')
+    block = message.content[0]
+    if block.type != 'tool_use' or block.name != 'extract_comparison':
+        raise ValueError('Unexpected comparison output')
+    selection = ComparisonEvidence.model_validate(block.input)
+    if selection.status == 'insufficient_evidence':
+        if selection.quotes:
+            raise ValueError('Abstention cannot contain quotes')
+        return GroundedAnswer(status='insufficient_evidence', answer=ABSTENTION, cited_source_ids=[])
+    evidence = {c['citation_id']:c['content'] for c in context}
+    seen = set()
+    for item in selection.quotes:
+        key = item.source_id, item.quote
+        if (item.source_id not in evidence or not item.quote.strip()
+                or item.quote not in evidence[item.source_id] or key in seen
+                or re.search(r'\[S[^\]\r\n]*\]', item.quote, re.I)):
+            raise ValueError('Comparison quote must be unique, verbatim supplied evidence')
+        seen.add(key)
+    if len(seen) < 2:
+        raise ValueError('Comparison requires at least two distinct excerpts')
+    # The model never writes comparison prose or arithmetic. JSON quoting keeps
+    # source newlines/quotation marks inside explicit data boundaries.
+    rendered = 'Source excerpts (no calculation inferred):\n' + '\n'.join(
+        f'[{item.source_id}] {json.dumps(item.quote, ensure_ascii=False)}'
+        for item in selection.quotes)
+    return GroundedAnswer(status='answered', answer=rendered,
+                          cited_source_ids=list(dict.fromkeys(q.source_id for q in selection.quotes)))
 
 
 class SourceChunk(BaseModel):
@@ -149,13 +200,19 @@ def query(payload: QueryRequest, request: Request):
     answer = GroundedAnswer(status='insufficient_evidence', answer=ABSTENTION, cited_source_ids=[])
     if sources:
         model_started = time.monotonic()
+        comparison = comparison_requested(payload.question)
+        tool_name = 'extract_comparison' if comparison else 'submit_answer'
+        schema = ComparisonEvidence if comparison else GroundedAnswer
+        system_prompt = API_SYSTEM_PROMPT
+        if comparison:
+            system_prompt += "\nFor comparison requests, use extract_comparison. Select at least two distinct relevant verbatim excerpts from the supplied evidence, retaining the full value, unit, subject and qualifications. Never calculate, paraphrase or add comparison prose. If both sides are not supported, return insufficient_evidence and no quotes."
         try:
             message = client.messages.create(
-                model=MODEL, max_tokens=1600, system=API_SYSTEM_PROMPT,
+                model=MODEL, max_tokens=1600, system=system_prompt,
                 messages=[{'role': 'user', 'content': build_grounded_prompt(payload.question, context)}],
-                tools=[{'name': 'submit_answer', 'description': 'Return a grounded answer or abstain.',
-                        'input_schema': GroundedAnswer.model_json_schema()}],
-                tool_choice={'type': 'tool', 'name': 'submit_answer'})
+                tools=[{'name': tool_name, 'description': 'Return evidence-backed output or abstain.',
+                        'input_schema': schema.model_json_schema()}],
+                tool_choice={'type': 'tool', 'name': tool_name})
         except anthropic.APITimeoutError:
             raise HTTPException(504, 'Answer service timed out') from None
         except anthropic.RateLimitError:
@@ -164,7 +221,8 @@ def query(payload: QueryRequest, request: Request):
             logger.warning('answer_service_failed')
             raise HTTPException(502, 'Answer service unavailable') from None
         try:
-            answer = checked_answer(message, {s.citation_id for s in sources})
+            answer = (checked_comparison(message, context) if comparison
+                      else checked_answer(message, {s.citation_id for s in sources}))
         except (ValueError, ValidationError, AttributeError, TypeError):
             logger.warning('answer_contract_failed')
             raise HTTPException(502, 'Answer failed evidence validation') from None

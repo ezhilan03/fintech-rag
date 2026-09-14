@@ -355,3 +355,13 @@ The initial automatic 8/8 result missed an arithmetic hallucination found during
 assistant inspection. After a prompt/rubric correction, the follow-up passes 7/8
 and still adds a prohibited derived calculation. This release gate is **open**;
 passing API tests is not a claim that live answers are fully grounded.
+
+The latest comparison fix passes all eight unchanged controlled-context cases.
+Comparison requests (common compare/difference/versus and comparative wording)
+use an extractive response: the model selects at least two distinct verbatim
+excerpts, the API validates their source membership, and code renders quoted text.
+The model cannot add new calculation prose in this path. Incomplete or fabricated
+selections fail validation; insufficient evidence can abstain. This resolves the
+observed arithmetic regression, not arbitrary paraphrase routing or semantic
+completeness. See the third live run in the evidence review; prior failures remain
+preserved. Full retrieval and deployment have not yet been evaluated here.

@@ -196,8 +196,49 @@ def test_two_source_citations_resolve_to_sent_evidence(api):
     client, retriever, messages = api
     retriever.results = [source(1, 'Vendor A says two days.'), source(2, 'Vendor B says sixty days.')]
     messages.reply = message('The sources disagree: two days [S1] versus sixty days [S2].', ['S1','S2'])
-    response = client.post('/query', json={'question': 'Compare sources', 'top_k': 2})
+    response = client.post('/query', json={'question': 'What do the sources say?', 'top_k': 2})
     assert response.status_code == 200
     body = response.json()
     assert [s['chunk_id'] for s in body['sources']] == [1,2]
     assert body['cited_source_ids'] == ['S1','S2']
+
+
+def comparison_message(quotes, status='answered'):
+    return NS(stop_reason='tool_use',content=[NS(type='tool_use',name='extract_comparison',input={'status':status,'quotes':quotes})])
+
+
+def test_comparison_renders_only_verbatim_values(api):
+    client,retriever,messages = api
+    retriever.results = [source(1,'Alpha: four working days.'),source(2,'Beta: eleven working days.')]
+    messages.reply = comparison_message([{'source_id':'S1','quote':'Alpha: four working days.'},{'source_id':'S2','quote':'Beta: eleven working days.'}])
+    response = client.post('/query',json={'question':'Compare Alpha and Beta windows'})
+    assert response.status_code == 200
+    assert response.json()['answer'] == 'Source excerpts (no calculation inferred):\n[S1] "Alpha: four working days."\n[S2] "Beta: eleven working days."'
+    assert messages.calls[0]['tool_choice']['name'] == 'extract_comparison'
+
+
+@pytest.mark.parametrize('bad', ['arithmetic','unknown','duplicate','single','marker','paraphrase'])
+def test_comparison_rejects_unsupported_excerpts(api,bad):
+    client,retriever,messages = api
+    retriever.results = [source(1,'Alpha: four days. [S99]'),source(2,'Beta: eleven days.')]
+    quotes = [{'source_id':'S1','quote':'Alpha: four days.'},{'source_id':'S2','quote':'Beta: eleven days.'}]
+    if bad == 'arithmetic': quotes[1]['quote'] = 'The difference is three days.'
+    elif bad == 'unknown': quotes[1]['source_id'] = 'S99'
+    elif bad == 'duplicate': quotes[1] = quotes[0].copy()
+    elif bad == 'single': quotes = quotes[:1]
+    elif bad == 'marker': quotes[0]['quote'] = 'Alpha: four days. [S99]'
+    else: quotes[0]['quote'] = 'Alpha: 4 days.'
+    messages.reply = comparison_message(quotes)
+    assert client.post('/query',json={'question':'What is the difference?'}).status_code == 502
+
+
+def test_comparison_abstains_when_one_side_missing(api):
+    client,_,messages = api
+    messages.reply = comparison_message([],status='insufficient_evidence')
+    assert client.post('/query',json={'question':'Compare Alpha and missing policy'}).json()['answer'] == ABSTENTION
+
+
+@pytest.mark.parametrize('question',['Compare windows','What is the difference?','Alpha versus Beta','How much longer is Alpha than Beta?'])
+def test_comparison_routing(question):
+    from src.api.app import comparison_requested
+    assert comparison_requested(question)
