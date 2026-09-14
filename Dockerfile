@@ -20,7 +20,7 @@ CMD ["uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
 
 FROM runtime AS test
 USER root
-RUN uv sync --frozen --only-group runtime --group ingestion-test
+RUN uv sync --frozen --only-group runtime --only-group ingestion-test
 COPY tests/ ./tests/
 COPY eval/ ./eval/
 COPY scripts/ ./scripts/
