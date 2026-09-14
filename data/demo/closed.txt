@@ -1,0 +1,2 @@
+R02 Account Closed
+The customer's bank account is permanently closed. Do not retry. Obtain replacement bank account details from the customer.

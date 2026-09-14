@@ -7,6 +7,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --only-group runtime
 ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH="/app" HF_HOME="/opt/hf"
 COPY src/ ./src/
+COPY data/demo/ ./data/demo/
 # Pin and bundle the tested embedding snapshot. Startup needs no model download.
 RUN python -c "from src.ingestion.embedder import Embedder; Embedder()"
 RUN useradd --uid 1000 --create-home appuser

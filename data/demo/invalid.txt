@@ -1,0 +1,2 @@
+R03 Unable to Locate Account
+The supplied account number does not identify a bank account. Ask for corrected bank details.

@@ -8,3 +8,4 @@
 eval/results
 data/raw
 *.tfstate*
+infra

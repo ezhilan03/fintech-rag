@@ -3,6 +3,7 @@ on:
   pull_request:
   push:
     branches: [master, main]
+  workflow_call:
   workflow_dispatch:
 permissions:
   contents: read
@@ -60,3 +61,13 @@ jobs:
         with:
           name: container-verification
           path: container-verification.json
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.14.0'
+      - run: terraform -chdir=infra/aws fmt -check
+      - run: terraform -chdir=infra/aws init -backend=false -input=false
+      - run: terraform -chdir=infra/aws validate

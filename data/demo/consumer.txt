@@ -1,0 +1,2 @@
+R10 Consumer Not Authorized
+A consumer reports they never authorized the debit. Resolve authorization with the customer before any new debit.

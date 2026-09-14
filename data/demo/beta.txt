@@ -1,0 +1,2 @@
+R01 Insufficient Funds
+Synthetic Beta policy: an R01 insufficient-funds payment may be retried three times. Review within eleven working days.
