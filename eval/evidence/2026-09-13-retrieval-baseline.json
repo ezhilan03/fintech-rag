@@ -1,0 +1,144 @@
+{
+  "scope": "Synthetic retrieval regression using real BGE embeddings and PostgreSQL/pgvector. Not current payment guidance.",
+  "embedding_model": "BAAI/bge-small-en-v1.5",
+  "model_revision": null,
+  "dimensions": 384,
+  "fixture_sha256": "081a44b3ac93404fd13e8d3c3884554199447ef8dd0926c029dc6c1ddbe3fa3c",
+  "code_sha256": {
+    "src/retrieval/retriever.py": "0f5ca5ea27ff8aa19323fd3dee4c03942a70e2d2a0eb0e2a471b43ba861c7b03",
+    "src/ingestion/embedder.py": "b6770f609e8eb72b9219a613c82e7ad5deecb71153e907ded2f81c8815caca53"
+  },
+  "commit": "cdea0354bde74feb053d9d27bfbe8a607d40dcb0",
+  "all_passed": false,
+  "cases": [
+    {
+      "id": "exact",
+      "passed": true,
+      "required_sources": [
+        "closed.txt"
+      ],
+      "found_sources": [
+        "closed.txt"
+      ],
+      "vector_scores": [
+        1.0
+      ]
+    },
+    {
+      "id": "semantic",
+      "passed": true,
+      "required_sources": [
+        "closed.txt"
+      ],
+      "found_sources": [
+        "closed.txt",
+        "invalid.txt",
+        "consumer.txt"
+      ],
+      "vector_scores": [
+        0.8119123206243133,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "conflicting_vendors",
+      "passed": false,
+      "required_sources": [
+        "alpha.txt",
+        "beta.txt"
+      ],
+      "found_sources": [
+        "alpha.txt",
+        "closed.txt",
+        "consumer.txt",
+        "corporate.txt",
+        "invalid.txt"
+      ],
+      "vector_scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "two_codes",
+      "passed": true,
+      "required_sources": [
+        "closed.txt",
+        "corporate.txt"
+      ],
+      "found_sources": [
+        "closed.txt",
+        "corporate.txt",
+        "alpha.txt",
+        "consumer.txt",
+        "invalid.txt"
+      ],
+      "vector_scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "consumer_semantic",
+      "passed": true,
+      "required_sources": [
+        "consumer.txt"
+      ],
+      "found_sources": [
+        "consumer.txt",
+        "corporate.txt",
+        "closed.txt"
+      ],
+      "vector_scores": [
+        0.845878092191562,
+        0.7907740127117675,
+        0.0
+      ]
+    },
+    {
+      "id": "unsupported_code",
+      "passed": false,
+      "required_sources": [],
+      "found_sources": [
+        "invalid.txt",
+        "alpha.txt",
+        "closed.txt",
+        "consumer.txt",
+        "corporate.txt"
+      ],
+      "vector_scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "unrelated",
+      "passed": false,
+      "required_sources": [],
+      "found_sources": [
+        "alpha.txt",
+        "closed.txt",
+        "consumer.txt",
+        "corporate.txt",
+        "invalid.txt"
+      ],
+      "vector_scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ]
+}

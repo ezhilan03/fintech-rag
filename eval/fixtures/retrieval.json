@@ -1,0 +1,20 @@
+{
+  "scope":"Synthetic retrieval regression using real BGE embeddings and PostgreSQL/pgvector. Not current payment guidance.",
+  "documents":{
+    "alpha.txt":"R01 Insufficient Funds\nSynthetic Alpha policy: an R01 insufficient-funds payment may be retried three times. Review within four working days.",
+    "beta.txt":"R01 Insufficient Funds\nSynthetic Beta policy: an R01 insufficient-funds payment may be retried three times. Review within eleven working days.",
+    "closed.txt":"R02 Account Closed\nThe customer's bank account is permanently closed. Do not retry. Obtain replacement bank account details from the customer.",
+    "consumer.txt":"R10 Consumer Not Authorized\nA consumer reports they never authorized the debit. Resolve authorization with the customer before any new debit.",
+    "corporate.txt":"R29 Corporate Not Authorized\nA corporate business account holder says the debit was not authorized. Investigate the authorization before another payment.",
+    "invalid.txt":"R03 Unable to Locate Account\nThe supplied account number does not identify a bank account. Ask for corrected bank details."
+  },
+  "cases":[
+    {"id":"exact","question":"What does R02 mean?","top_k":1,"required_sources":["closed.txt"],"empty":false},
+    {"id":"semantic","question":"The bank account has been permanently closed; what should I do?","top_k":3,"required_sources":["closed.txt"],"empty":false},
+    {"id":"conflicting_vendors","question":"Compare R01 review windows from Alpha and Beta","top_k":5,"required_sources":["alpha.txt","beta.txt"],"empty":false},
+    {"id":"two_codes","question":"Compare R02 and R29","top_k":5,"required_sources":["closed.txt","corporate.txt"],"empty":false},
+    {"id":"consumer_semantic","question":"The consumer says they never authorized this debit","top_k":3,"required_sources":["consumer.txt"],"empty":false},
+    {"id":"unsupported_code","question":"What does R99 mean?","top_k":5,"required_sources":[],"empty":true},
+    {"id":"unrelated","question":"Explain photosynthesis in oak leaves","top_k":5,"required_sources":[],"empty":true}
+  ]
+}

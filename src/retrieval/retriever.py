@@ -6,7 +6,7 @@ fused with Reciprocal Rank Fusion (RRF).
 Key improvements over naive retrieval:
   - Query-type aware weighting: explicit code queries boost BM25
   - R61-R85 excluded: dishonored/correction codes pollute results
-  - Deduplication: one result per return code
+  - Deduplication: identical excerpts per source, preserving vendor disagreement
   - Injection: guarantees explicitly named codes appear in results
   - Similarity threshold: drops irrelevant vector results
 """
@@ -113,7 +113,7 @@ class HybridRetriever:
             conn.close()
 
         self.chunks = rows
-        tokenized = [row[1].lower().split() for row in rows]
+        tokenized = [re.findall(r'[a-z0-9]+', row[1].lower()) for row in rows]
         self.bm25 = BM25Okapi(tokenized) if tokenized else None
         self.id_to_index = {row[0]: i for i, row in enumerate(rows)}
 
@@ -135,7 +135,7 @@ class HybridRetriever:
 
     def _extract_explicit_codes(self, query: str) -> list[str]:
         """Extract all return codes explicitly mentioned in the query."""
-        return list(set(re.findall(r'\bR\d{2}\b', query.upper())))
+        return sorted(set(re.findall(r'\bR\d{2}\b', query.upper())))
 
     def _inject_missing_codes(
         self,
@@ -192,7 +192,7 @@ class HybridRetriever:
                         version_id      = row[8],
                         source_sha256   = row[9],
                         chunk_index     = row[10],
-                        vector_score    = 1.0,
+                        vector_score    = 0.0,
                         bm25_rank       = 0,
                         rrf_score       = 1.0,
                     ))
@@ -239,11 +239,11 @@ class HybridRetriever:
     ) -> list[tuple[int, float]]:
         if self.bm25 is None:
             return []
-        tokenized_query = query.lower().split()
+        tokenized_query = re.findall(r'[a-z0-9]+', query.lower())
         scores = self.bm25.get_scores(tokenized_query)
         scored = [
             (self.chunks[i][0], float(scores[i]))
-            for i in range(len(scores))
+            for i in range(len(scores)) if scores[i] > 0
         ]
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:fetch_k]
@@ -284,17 +284,13 @@ class HybridRetriever:
         self,
         results: list[RetrievalResult],
     ) -> list[RetrievalResult]:
-        seen_codes: dict[str, RetrievalResult] = {}
-        seen_preamble = 0
+        seen = set()
         deduped = []
-
         for result in results:
-            if result.return_code is None:
-                if seen_preamble < 1:
-                    deduped.append(result)
-                    seen_preamble += 1
-            elif result.return_code not in seen_codes:
-                seen_codes[result.return_code] = result
+            # Preserve distinct vendors, including contradictory same-code rules.
+            key = result.source_doc, result.content
+            if key not in seen:
+                seen.add(key)
                 deduped.append(result)
 
         return deduped
@@ -342,7 +338,7 @@ class HybridRetriever:
           2. Vector search (pgvector HNSW)
           3. BM25 keyword search (in-memory)
           4. RRF fusion — query-type aware weighting
-          5. Deduplicate — one result per return code
+          5. Deduplicate identical excerpts within each source
           6. Slice to top_k
           7. Inject any explicitly named codes missing from top_k
         """
@@ -351,7 +347,7 @@ class HybridRetriever:
         bm25_results   = self._bm25_search(query, fetch_k=20)
 
         if not vector_results and not bm25_results:
-            return []
+            return self._inject_missing_codes([], query)
 
         if self._is_explicit_code_query(query):
             fused = self._rrf_fusion(
@@ -376,6 +372,9 @@ class HybridRetriever:
             if idx is None:
                 continue
             row = self.chunks[idx]
+            explicit_codes = self._extract_explicit_codes(query)
+            if explicit_codes and row[2] not in explicit_codes:
+                continue
             results.append(RetrievalResult(
                 chunk_id        = row[0],
                 content         = row[1],

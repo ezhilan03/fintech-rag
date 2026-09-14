@@ -1,0 +1,10 @@
+.git
+.venv
+.env
+.env.*
+!.env.example
+**/__pycache__
+.pytest_cache
+eval/results
+data/raw
+*.tfstate*

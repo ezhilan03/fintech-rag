@@ -235,3 +235,27 @@ def test_request_options_provenance_and_default_isolation(db):
     assert results[0].source_sha256 == hashlib.sha256(source.read_bytes()).hexdigest()
     assert retriever.strategy == 'clause' and retriever.top_k == 5
     assert retriever.retrieve('R01')[0].version_id != recursive['version_id']
+
+
+def test_conflicting_vendors_survive_deduplication(db):
+    _, source, embedder = db
+    ingest(db,source_id='vendor-a.txt')
+    source.write_text('R01 Insufficient Funds\nAnother vendor gives a conflicting synthetic review rule.')
+    ingest(db,source_id='vendor-b.txt')
+    retriever = HybridRetriever(embedder=embedder)
+    assert {r.source_doc for r in retriever.retrieve('R01')} == {'vendor-a.txt','vendor-b.txt'}
+
+
+def test_unknown_explicit_code_does_not_return_different_codes(db):
+    _, _, embedder = db
+    ingest(db)
+    retriever = HybridRetriever(embedder=embedder)
+    assert retriever.retrieve('What does R99 mean?') == []
+
+
+def test_zero_keyword_scores_are_not_evidence(db, monkeypatch):
+    _, _, embedder = db
+    ingest(db)
+    retriever = HybridRetriever(embedder=embedder)
+    monkeypatch.setattr(retriever,'_vector_search',lambda *a,**kw: [])
+    assert retriever.retrieve('photosynthesis oak leaves') == []

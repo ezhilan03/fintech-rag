@@ -11,7 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
+from eval.provenance import source_revision, dirty_worktree
 from types import SimpleNamespace
 
 import anthropic
@@ -151,8 +151,8 @@ def evaluate(*, live=False, max_cost=0.15, output_dir=Path('eval/results')):
         'created_at':datetime.now(timezone.utc).isoformat(),
         'fixture_sha256':hashlib.sha256(FIXTURES.read_bytes()).hexdigest(),
         'code_sha256':{name:hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in ['eval/grounding.py','src/api/app.py','src/api/prompt.py']},
-        'commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
-        'working_tree_dirty':bool(subprocess.check_output(['git','status','--porcelain'],text=True).strip()),
+        'commit':source_revision(),
+        'working_tree_dirty':dirty_worktree(),
         'expected_cases':len(data['cases']), 'completed_cases':len(records),
         'checks_passed':len(records)==len(data['cases']) and all(r['checks_passed'] for r in records),
         'semantic_review':'pending' if live else 'not_applicable',

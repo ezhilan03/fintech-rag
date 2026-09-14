@@ -31,3 +31,32 @@ jobs:
       - run: uv run --no-sync pytest tests -q
         env:
           RAG_TEST_DATABASE_URL: postgresql://postgres:integration-test-only@localhost:5432/ragtest
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: integration-test-only
+          POSTGRES_DB: ragtest
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ragtest"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build CPU-only test and production images
+        run: |
+          docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" --target test -t rag:test .
+          docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" --target production -t rag:production .
+      - name: Test with no external network access
+        run: |
+          docker network create --internal rag-verification
+          docker network connect --alias pg rag-verification '${{ job.services.postgres.id }}'
+          docker run --name rag-verification --network rag-verification -e RAG_TEST_DATABASE_URL=postgresql://postgres:integration-test-only@pg:5432/ragtest rag:test python scripts/container_smoke.py
+          docker cp rag-verification:/tmp/container-verification.json container-verification.json
+          test "$(docker inspect rag:production --format '{{.Config.User}}')" = '1000:1000'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: container-verification
+          path: container-verification.json

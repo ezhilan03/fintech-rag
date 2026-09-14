@@ -1,0 +1,108 @@
+{
+  "scope": "Synthetic retrieval regression using real BGE embeddings and PostgreSQL/pgvector. Not current payment guidance.",
+  "embedding_model": "BAAI/bge-small-en-v1.5",
+  "model_revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+  "dimensions": 384,
+  "fixture_sha256": "081a44b3ac93404fd13e8d3c3884554199447ef8dd0926c029dc6c1ddbe3fa3c",
+  "code_sha256": {
+    "src/retrieval/retriever.py": "3fdb2728e37d37c83504996399aa6aeaa34a331444d92cecf7b9f624616bf384",
+    "src/ingestion/embedder.py": "053eab1716d68ee3ce76d68a1f4dd1147b361a2da7d6cec5e25762c59722510e"
+  },
+  "commit": "cdea0354bde74feb053d9d27bfbe8a607d40dcb0",
+  "all_passed": true,
+  "cases": [
+    {
+      "id": "exact",
+      "passed": true,
+      "required_sources": [
+        "closed.txt"
+      ],
+      "found_sources": [
+        "closed.txt"
+      ],
+      "vector_scores": [
+        0.0
+      ]
+    },
+    {
+      "id": "semantic",
+      "passed": true,
+      "required_sources": [
+        "closed.txt"
+      ],
+      "found_sources": [
+        "closed.txt",
+        "invalid.txt",
+        "consumer.txt"
+      ],
+      "vector_scores": [
+        0.8119123206243133,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "conflicting_vendors",
+      "passed": true,
+      "required_sources": [
+        "alpha.txt",
+        "beta.txt"
+      ],
+      "found_sources": [
+        "alpha.txt",
+        "beta.txt"
+      ],
+      "vector_scores": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "two_codes",
+      "passed": true,
+      "required_sources": [
+        "closed.txt",
+        "corporate.txt"
+      ],
+      "found_sources": [
+        "corporate.txt",
+        "closed.txt"
+      ],
+      "vector_scores": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "consumer_semantic",
+      "passed": true,
+      "required_sources": [
+        "consumer.txt"
+      ],
+      "found_sources": [
+        "consumer.txt",
+        "corporate.txt",
+        "closed.txt"
+      ],
+      "vector_scores": [
+        0.845878092191562,
+        0.7907740127117675,
+        0.0
+      ]
+    },
+    {
+      "id": "unsupported_code",
+      "passed": true,
+      "required_sources": [],
+      "found_sources": [],
+      "vector_scores": []
+    },
+    {
+      "id": "unrelated",
+      "passed": true,
+      "required_sources": [],
+      "found_sources": [],
+      "vector_scores": []
+    }
+  ]
+}

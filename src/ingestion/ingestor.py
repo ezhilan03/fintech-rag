@@ -44,6 +44,7 @@ def ingest_source(filepath, source_type, strategy="clause", embedder=None, *, so
     embedder = embedder or Embedder()
     pipeline = {
         "model": embedder.model_name,
+        "model_revision": getattr(embedder, "revision", None),
         "dimensions": embedder.dimensions,
         "chunker_sha256": hashlib.sha256(Path(__file__).with_name("chunker.py").read_bytes()).hexdigest(),
         "embedder_sha256": hashlib.sha256(Path(__file__).with_name("embedder.py").read_bytes()).hexdigest(),

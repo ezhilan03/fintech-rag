@@ -365,3 +365,26 @@ selections fail validation; insufficient evidence can abstain. This resolves the
 observed arithmetic regression, not arbitrary paraphrase routing or semantic
 completeness. See the third live run in the evidence review; prior failures remain
 preserved. Full retrieval and deployment have not yet been evaluated here.
+
+### Real retrieval and container verification
+
+`python -m eval.retrieval_check` uses the real 384-dimensional BGE model and an
+explicit `RAG_TEST_DATABASE_URL`, creates an isolated schema, ingests six synthetic
+sources and checks seven retrieval cases, then removes only its schema. The first
+run failed conflicting-vendor, unsupported-code and unrelated-question cases.
+The fixed run passes all seven: distinct vendor excerpts survive deduplication,
+zero BM25 scores are excluded, and explicit code queries do not return other codes.
+This small fixture measures required-source presence and selected abstentions;
+it is not a broad precision benchmark or real Nacha-rule validation.
+
+BGE weights are pinned at `5c38ec7c405ec4b44b94cc5a9bb96e735b38267a`.
+The Python 3.11 image installs only the runtime dependency group, pins uv, uses
+CPU-only PyTorch on Linux and bundles the embedding snapshot. It runs as UID 1000
+with offline model loading. Development secrets, local data and virtualenvs are
+excluded from the build context. A separate test target includes test tools.
+
+CI builds both targets and runs the full tests, real retrieval check and actual
+Uvicorn startup/health/abstention checks on an internal Docker network without
+external access. No real API credential is supplied to this smoke test. Its report
+is uploaded as a workflow artifact. The test image and production image share the
+runtime layers; the production target omits test/evaluation code.
