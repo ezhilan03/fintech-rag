@@ -349,3 +349,9 @@ Pattern and citation checks detect selected regressions. Live reports still requ
 human semantic review before making answer-quality claims. The old `eval/evaluator.py`
 uses the earlier prompt and extra RAGAS judging calls; it is retained as historical
 exploration and is not the current API release gate.
+
+Latest live grounding evidence: [review and both runs](eval/evidence/REVIEW.md).
+The initial automatic 8/8 result missed an arithmetic hallucination found during
+assistant inspection. After a prompt/rubric correction, the follow-up passes 7/8
+and still adds a prohibited derived calculation. This release gate is **open**;
+passing API tests is not a claim that live answers are fully grounded.

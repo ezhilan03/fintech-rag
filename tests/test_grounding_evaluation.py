@@ -79,3 +79,9 @@ def test_usage_is_recorded_separately_from_maximum_reservation():
 def test_invalid_budgets_rejected(tmp_path, budget):
     with pytest.raises(ValueError):
         evaluate(max_cost=budget,output_dir=tmp_path)
+
+
+def test_observed_arithmetic_hallucination_is_a_regression():
+    case = next(c for c in json.loads(FIXTURES.read_text())['cases'] if c['id']=='comparison')
+    failures = score(case,200,{'status':'answered','answer':'Alpha is four days [S1]; Beta is eleven days [S2]. Alpha is three working days faster.', 'cited_source_ids':['S1','S2']})
+    assert any(f.startswith('forbidden_pattern') for f in failures)

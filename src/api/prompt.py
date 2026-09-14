@@ -94,7 +94,9 @@ If the evidence is insufficient, submit status insufficient_evidence with no
 citations. If sources disagree, describe the disagreement and cite both sources.
 For an answered response, cite each factual claim with the exact supplied marker
 such as [S1]. cited_source_ids must contain exactly the IDs used in those markers.
-Never invent source IDs. Submit your response using submit_answer only."""
+Never invent source IDs. Do not introduce calculations or derived quantities
+not explicitly stated in the evidence. When comparing, report the supplied values
+without adding new calculations. Submit your response using submit_answer only."""
 
 
 def build_grounded_prompt(question, chunks):
