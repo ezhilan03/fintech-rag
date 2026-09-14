@@ -56,7 +56,7 @@ Test credentials must point to a disposable test database. Live grounding evalua
 
 ## AWS demo operation
 
-The demo is deliberately **on demand**, with no public API port. Run **Release and verify AWS demo** from the `master` branch in GitHub Actions. The workflow checks the code, publishes an immutable image, starts the designated host, invokes a restricted SSM document, verifies the application and recovery, uploads evidence, and stops the host in a final cleanup step. An independent host timer stops it after one hour if the workflow is interrupted.
+The demo is deliberately **on demand**, with no public API port. Run **Release and verify AWS demo** from the `main` branch in GitHub Actions. The workflow checks the code, publishes an immutable image, starts the designated host, invokes a restricted SSM document, verifies the application and recovery, uploads evidence, and stops the host in a final cleanup step. An independent host timer stops it after one hour if the workflow is interrupted.
 
 Each run stores a manifest, report and PostgreSQL backup in a private S3 bucket. Reports contain synthetic query evidence, never credentials. Runtime credentials come from an SSM SecureString; Terraform state does not contain the Anthropic key. Infrastructure state is kept outside Git. See [operations](docs/OPERATIONS.md) for bootstrap and recovery.
 

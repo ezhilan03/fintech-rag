@@ -8,11 +8,11 @@ Provide account_id, subnet_id, vpc_id and a tested Amazon Linux 2023 ARM64 ami i
 
 Create `/fintech-rag-portfolio/anthropic-key` as an SSM SecureString through a secure credential workflow. Never put the value in Terraform variables, repository files, workflow inputs or shell history. The runtime role can read only that parameter. The API containers cannot obtain instance-role credentials through IMDS (required tokens, hop limit one).
 
-Create the GitHub `rag-release` environment restricted to `master`, and set environment variables from Terraform outputs: RAG_INSTANCE_ID, RAG_SSM_DOCUMENT, RAG_BUCKET, RAG_REPOSITORY and RAG_RELEASE_ROLE. The trust policy binds the immutable GitHub owner/repository IDs and that environment. A $5 account-wide budget with early warnings must exist before operation; this is a notification guard, not automatic spending enforcement.
+Create the GitHub `rag-release` environment restricted to `main`, and set environment variables from Terraform outputs: RAG_INSTANCE_ID, RAG_SSM_DOCUMENT, RAG_BUCKET, RAG_REPOSITORY and RAG_RELEASE_ROLE. The trust policy binds the immutable GitHub owner/repository IDs and that environment. A $5 account-wide budget with early warnings must exist before operation; this is a notification guard, not automatic spending enforcement.
 
 ## Release and rollback
 
-Run the manual release workflow from master. Its evidence artifact includes the exact Git revision and ECR image digest. Repeating a revision reuses its immutable image; it does not overwrite the tag. Release operations are serialized.
+Run the manual release workflow from main. Its evidence artifact includes the exact Git revision and ECR image digest. Repeating a revision reuses its immutable image; it does not overwrite the tag. Release operations are serialized.
 
 For rollback, an authorized operator may invoke the SSM document with a previously verified revision whose image and release manifest are retained. The current demo script applies additive schema changes only. For future destructive migrations, explicitly design and test rollback before shipping them. Do not assume reverting application code can revert a database schema.
 

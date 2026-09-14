@@ -11,7 +11,7 @@ jobs:
     uses: ./.github/workflows/ingestion.yml
   release:
     needs: checks
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/main'
     environment: rag-release
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 50
