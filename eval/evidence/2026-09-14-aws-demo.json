@@ -1,0 +1,66 @@
+{
+  "revision": "5fc8cc431b02f671c872963c4f404bc1d4ecba81",
+  "synthetic_data": true,
+  "checks": {
+    "seed_replay": {
+      "sources": 6,
+      "unchanged_replays": 6
+    },
+    "health": 200,
+    "unsupported_code_abstains": true,
+    "live_grounded_comparison": {
+      "answer": "Source excerpts (no calculation inferred):\n[S1] \"R01 Insufficient Funds\\nSynthetic Alpha policy: an R01 insufficient-funds payment may be retried three times. Review within four working days.\"\n[S2] \"R01 Insufficient Funds\\nSynthetic Beta policy: an R01 insufficient-funds payment may be retried three times. Review within eleven working days.\"",
+      "status": "answered",
+      "cited_source_ids": [
+        "S1",
+        "S2"
+      ],
+      "sources": [
+        {
+          "citation_id": "S1",
+          "chunk_id": 1,
+          "source_doc": "alpha.txt",
+          "version_id": 1,
+          "chunk_index": 0,
+          "source_sha256": "1b863ace814a6143b3eaf29a48de8aa5a1f852d27292954769c3bf93af6f7080",
+          "context_sha256": "f5253de59065353c94c964b987ac537b10a8b5871733ecb00858436b6811d5ae",
+          "return_code": "R01",
+          "return_window": null,
+          "can_retry": null,
+          "vector_score": 0.0,
+          "rrf_score": 0.1,
+          "content_preview": "R01 Insufficient Funds\nSynthetic Alpha policy: an R01 insufficient-funds payment may be retried three times. Review within four working days."
+        },
+        {
+          "citation_id": "S2",
+          "chunk_id": 2,
+          "source_doc": "beta.txt",
+          "version_id": 2,
+          "chunk_index": 0,
+          "source_sha256": "8fa68d35ffc324b462bdebd28cf44b514ff3d2f7494531f96cf2419e92b14701",
+          "context_sha256": "6ed0bf38b8986d547494baee640a8fcb52bb5613aca30d5d4f4eaa3baaa156a5",
+          "return_code": "R01",
+          "return_window": null,
+          "can_retry": null,
+          "vector_score": 0.0,
+          "rrf_score": 0.09090909090909091,
+          "content_preview": "R01 Insufficient Funds\nSynthetic Beta policy: an R01 insufficient-funds payment may be retried three times. Review within eleven working days."
+        }
+      ],
+      "question": "Compare the R01 retry windows in the Alpha and Beta policies.",
+      "model_used": "claude-haiku-4-5",
+      "retrieval_ms": 87,
+      "llm_ms": 1759,
+      "total_ms": 1846,
+      "chunks_found": 2
+    },
+    "backup_restore": {
+      "counts": "6|6|6",
+      "chunk_checksum_matches": true
+    },
+    "dependency_failure_detected": true,
+    "recovered": true
+  },
+  "passed": true,
+  "image": "943088191195.dkr.ecr.us-east-1.amazonaws.com/fintech-rag-portfolio@sha256:b482cbf2b955e69cc7ca07bd04e602bac551405d54393ef4fec6d1bd12792ec4"
+}

@@ -29,7 +29,7 @@ flowchart LR
 | Unit, API and PostgreSQL contracts | 84 tests | [CI](https://github.com/ezhilan03/fintech-rag/actions/workflows/ingestion.yml) |
 | Real BGE + pgvector retrieval | 7/7 controlled cases | [Retrieval evidence](eval/evidence/) |
 | Live Haiku grounded answers | 8/8 controlled-context cases | [Evidence review](eval/evidence/REVIEW.md) |
-| AWS release, backup/restore and recovery | Recorded by release workflow | [Release runs](https://github.com/ezhilan03/fintech-rag/actions/workflows/release.yml) |
+| AWS release, backup/restore and recovery | Passed; host stopped | [Release evidence](docs/RELEASE-0.2.0.md) |
 
 The eight grounding cases isolate generation from retrieval; they are not an end-to-end accuracy estimate. The seven retrieval cases are a small synthetic regression suite. Earlier failed runs remain in the evidence directory. No claim of comprehensive compliance correctness or an independently audited production service is made.
 

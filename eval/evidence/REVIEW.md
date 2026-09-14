@@ -64,3 +64,7 @@ claim of general semantic reliability. Routing recognizes common comparison
 wording, not every possible paraphrase. Exact-quote validation proves textual
 provenance, not that the selected excerpts are complete or answer the question.
 Full retrieval and container/deployment gates remain outstanding.
+
+## Completed release gates
+
+The earlier outstanding retrieval/container/deployment statements above are historical. The release now has 84 passing tests, 7/7 real-embedding retrieval cases, and a successful AWS query/replay/backup-restore/dependency-recovery run. See `docs/RELEASE-0.2.0.md` and `2026-09-14-aws-demo.json` for bounded evidence. Both demo hosts were verified stopped.
