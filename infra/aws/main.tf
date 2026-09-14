@@ -138,7 +138,7 @@ resource "aws_ssm_document" "demo" {
   document_type = "Command"
   content = jsonencode({ schemaVersion = "2.2", description = "Run and verify a bounded synthetic RAG release", parameters = { Revision = { type = "String", allowedPattern = "^[0-9a-f]{40}$" } }, mainSteps = [{
     action = "aws:runShellScript", name = "rag", inputs = { timeoutSeconds = "1500", runCommand = [
-      "set -eu", "cloud-init status --wait", "install -d -m 700 /var/lib/fintech-rag",
+      "set -eu", "cloud-init status --wait", "systemctl enable --now docker", "install -d -m 700 /var/lib/fintech-rag",
       "echo '${base64encode(file("${path.module}/../../scripts/cloud_host.py"))}' | base64 -d >/var/lib/fintech-rag/run.py",
       "python3 /var/lib/fintech-rag/run.py '{{ Revision }}' '${aws_s3_bucket.artifacts.id}' '${aws_ecr_repository.app.repository_url}' '${var.region}' '/${var.name}/anthropic-key' '${aws_cloudwatch_log_group.app.name}'"
     ] }
